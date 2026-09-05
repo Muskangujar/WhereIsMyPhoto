@@ -12,6 +12,8 @@ env/
 ENV/
 env.bak/
 venv.bak/
+backend/
+
 
 # Next.js Build Output
 .next/
