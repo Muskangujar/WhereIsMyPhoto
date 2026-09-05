@@ -9,7 +9,7 @@ async function uploadToPublicCDN(buffer: Buffer, mimeType: string): Promise<stri
   try {
     const fd = new FormData();
     fd.append("reqtype", "fileupload");
-    fd.append("fileToUpload", new Blob([buffer], { type: mimeType }), filename);
+    fd.append("fileToUpload", new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
 
     const res = await fetch("https://catbox.moe/user/api.php", {
       method: "POST",
