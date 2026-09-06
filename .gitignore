@@ -36,8 +36,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# lib/ and lib64/ are Python virtualenv dirs — only ignore at root level
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -76,3 +77,19 @@ pnpm-debug.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Face detection model weights (>50 MB) — run scripts/download-models.ts to create
+models/
+
+# Blockchain attestation records with real data (may contain post URLs)
+attestations/
+
+# Chain compilation artifacts
+chain/artifacts/
+chain/cache/
+chain/typechain-types/
+chain/node_modules/
+
+# Fixtures (saved from real API calls — may contain PII)
+# Checked in only a safe example; delete and re-record if needed
+# fixtures/
