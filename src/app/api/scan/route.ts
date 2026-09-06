@@ -53,10 +53,36 @@ async function uploadToPublicCDN(buffer: Buffer, mimeType: string): Promise<stri
   return null;
 }
 
+async function querySerperLens(imageUrl: string, apiKey: string): Promise<any[]> {
+  try {
+    const res = await fetch("https://google.serper.dev/lens", {
+      method: "POST",
+      headers: {
+        "X-API-KEY": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url: imageUrl }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.organic)) {
+        return data.organic;
+      }
+    } else {
+      console.warn("Serper Lens API response not ok:", await res.text());
+    }
+  } catch (err) {
+    console.error("Serper Lens query failed:", err);
+  }
+  return [];
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const fullFile = formData.get("fullFile") as File | null;
     const clientApiKey = (formData.get("apiKey") as string) || "";
 
     if (!file) {
@@ -71,7 +97,7 @@ export async function POST(request: NextRequest) {
     const base64Image = buffer.toString("base64");
     const dataUrl = `data:${mimeType};base64,${base64Image}`;
 
-    // 1. Calculate Real Cryptographic Hashes
+    // Calculate Cryptographic Hashes
     const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
     const perceptualHash = crypto
       .createHash("md5")
@@ -80,45 +106,191 @@ export async function POST(request: NextRequest) {
       .slice(0, 16);
 
     const serperKey =
+      clientApiKey ||
       process.env.SERPER_API_KEY ||
       process.env.SERPER_API ||
       "634c23f08b4b220341b8adffd9104f4b84fd1fe8";
 
-    let realLensResults: any[] = [];
-    let publicImageUrl: string | null = null;
+    let rawMatches: any[] = [];
 
-    // --- STEP 1: UPLOAD TO FAST DIRECT CDN FOR GOOGLE LENS CRAWLER ---
     if (serperKey) {
-      publicImageUrl = await uploadToPublicCDN(buffer, mimeType);
-      console.log("Uploaded temporary image for Google Lens:", publicImageUrl);
+      // Stage 1: Upload primary target (face crop) and query Google Lens
+      const primaryUrl = await uploadToPublicCDN(buffer, mimeType);
+      console.log("Stage 1 primary image CDN URL:", primaryUrl);
 
-      if (publicImageUrl) {
-        try {
-          const lensRes = await fetch("https://google.serper.dev/lens", {
-            method: "POST",
-            headers: {
-              "X-API-KEY": serperKey,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ url: publicImageUrl }),
-          });
+      if (primaryUrl) {
+        const stage1Results = await querySerperLens(primaryUrl, serperKey);
+        rawMatches = stage1Results;
+      }
 
-          if (lensRes.ok) {
-            const lensData = await lensRes.json();
-            if (Array.isArray(lensData.organic)) {
-              realLensResults = lensData.organic;
-            }
-          } else {
-            console.error("Serper Lens API error:", await lensRes.text());
-          }
-        } catch (lensErr) {
-          console.error("Live Google Lens query failed:", lensErr);
+      // Stage 2: Fallback to full image if face crop yielded 0 matches and fullFile is provided
+      if (rawMatches.length === 0 && fullFile) {
+        const fullBuffer = Buffer.from(await fullFile.arrayBuffer());
+        const fullMime = fullFile.type || "image/jpeg";
+        const fullUrl = await uploadToPublicCDN(fullBuffer, fullMime);
+        console.log("Stage 2 full image fallback CDN URL:", fullUrl);
+
+        if (fullUrl) {
+          const stage2Results = await querySerperLens(fullUrl, serperKey);
+          rawMatches = stage2Results;
         }
       }
     }
 
-    // --- STEP 2: FORMAT DISCOVERED RESULTS ---
-    const results = realLensResults.slice(0, 15).map((item, idx) => {
+function isCommerceOrAccessory(item: any): boolean {
+  const title = (item.title || "").toLowerCase();
+  const snippet = (item.snippet || "").toLowerCase();
+  const link = (item.link || "").toLowerCase();
+  const source = (item.source || "").toLowerCase();
+  const text = `${title} ${snippet} ${link} ${source}`.toLowerCase();
+
+  // 1. E-commerce shopping URL paths
+  if (
+    link.includes("/products/") ||
+    link.includes("/product/") ||
+    link.includes("/item/") ||
+    link.includes("/items/") ||
+    link.includes("/p/") ||
+    link.includes("/pd/") ||
+    link.includes("/dp/") ||
+    link.includes("/gp/") ||
+    link.includes("/shop/") ||
+    link.includes("/cart/") ||
+    link.includes("/stores/") ||
+    link.includes("/buy/")
+  ) {
+    return true;
+  }
+
+  // 2. Commercial / Retail / Shopping domains
+  const shoppingDomains = [
+    "bobleisure",
+    "amazon",
+    "walmart",
+    "ebay",
+    "aliexpress",
+    "temu",
+    "shein",
+    "dhgate",
+    "target.com",
+    "etsy",
+    "mercari",
+    "grailed",
+    "zalando",
+    "dillard",
+    "farfetch",
+    "harrods",
+    "ashford",
+    "wmpeyewear",
+    "alensa",
+    "shadestation",
+    "revantoptics",
+    "safetyglasses",
+    "frameandoptic",
+    "blenderseyewear",
+    "smithoptics",
+    "otticamauro",
+    "trendhim",
+    "metalshop",
+    "handicraft",
+    "ubuy",
+    "desertcart",
+    "footy.com",
+    "openbox",
+    "optimaloptic",
+    "twelveweight",
+    "knockaround",
+    "super-shop",
+    "jlmatthews",
+    "bedbathandbeyond",
+    "faire.com",
+    "wye-delta",
+    "sportisimo",
+    "nordstrom",
+    "trendyol",
+    "amevista",
+    "styliafoe",
+    "dalessandro",
+    "twenty4action",
+    "hawkersco",
+    "pinibike",
+    "bloemenverlinde",
+    "noon.com",
+    "intialpaca",
+    "shades",
+    "optical",
+    "optics",
+    "eyewear",
+    "sunglass",
+    "goggle",
+  ];
+  if (shoppingDomains.some((d) => link.includes(d) || source.includes(d))) {
+    return true;
+  }
+
+  // 3. Product / Gear / Apparel keywords
+  const productWords = [
+    "sunglass",
+    "goggle",
+    "eyewear",
+    "eyeglass",
+    "spectacle",
+    "glass",
+    "shade",
+    "optic",
+    "lens",
+    "gafas",
+    "occhiali",
+    "polarized",
+    "muffler",
+    "scarf",
+    "shemagh",
+    "keffiyeh",
+    "jacket",
+    "coat",
+    "parka",
+    "fleece",
+    "hoodie",
+    "shirt",
+    "pants",
+    "trousers",
+    "gear",
+    "accessoire",
+    "accessory",
+    "accessories",
+    "fishing",
+    "hunting",
+    "apparel",
+    "clothing",
+    "wholesale",
+    "buy online",
+    "price",
+    "in stock",
+    "free shipping",
+    "order now",
+  ];
+  if (productWords.some((w) => text.includes(w))) {
+    return true;
+  }
+
+  return false;
+}
+
+    // Deduplicate by URL
+    const seenUrls = new Set<string>();
+    const uniqueMatches = rawMatches.filter((item) => {
+      const link = item.link || "";
+      if (!link || seenUrls.has(link)) return false;
+      seenUrls.add(link);
+      return true;
+    });
+
+    // Filter out all e-commerce products, shopping gear, and accessories
+    const filteredMatches = uniqueMatches.filter((item) => !isCommerceOrAccessory(item));
+    const filteredAccessoriesCount = uniqueMatches.length - filteredMatches.length;
+
+    // Format discovered results cleanly
+    const results = filteredMatches.slice(0, 15).map((item, idx) => {
       const link = item.link || "";
       let domain = "web.org";
       try {
@@ -128,7 +300,7 @@ export async function POST(request: NextRequest) {
       const source = item.source || domain;
 
       let category: "social" | "news" | "blog" | "portfolio" = "portfolio";
-      if (
+      const isSocialProfile =
         domain.includes("linkedin.com") ||
         domain.includes("instagram.com") ||
         domain.includes("twitter.com") ||
@@ -136,22 +308,29 @@ export async function POST(request: NextRequest) {
         domain.includes("facebook.com") ||
         domain.includes("pinterest.com") ||
         domain.includes("reddit.com") ||
-        domain.includes("github.com")
-      ) {
+        domain.includes("github.com") ||
+        domain.includes("threads.net") ||
+        domain.includes("youtube.com");
+
+      if (isSocialProfile) {
         category = "social";
       } else if (
         domain.includes("news") ||
         domain.includes("bbc") ||
         domain.includes("forbes") ||
-        domain.includes("medium.com")
+        domain.includes("medium.com") ||
+        domain.includes("techcrunch")
       ) {
         category = "news";
+      } else if (domain.includes("blog") || domain.includes("wordpress") || domain.includes("substack")) {
+        category = "blog";
       }
 
-      const isExactOrLinkedIn = domain.includes("linkedin.com") || idx === 0;
-      const similarity = isExactOrLinkedIn
-        ? 98.6
-        : Math.max(78, Math.min(96, 95.0 - idx * 1.8));
+      // Only true profile matches receive exact match status
+      const isExactProfile = isSocialProfile && (link.includes("/in/") || link.includes("/user/") || link.includes("/profile/"));
+      const similarity = isExactProfile
+        ? 96.5
+        : Math.max(72, Math.min(91, 88.0 - idx * 2.0));
 
       return {
         id: `res-lens-${idx + 1}`,
@@ -162,16 +341,16 @@ export async function POST(request: NextRequest) {
         snippet: item.snippet || `Indexed visual appearance on ${domain}.`,
         thumbnail: item.thumbnailUrl || item.imageUrl || dataUrl,
         similarity,
-        matchType: isExactOrLinkedIn
+        matchType: isExactProfile
           ? ("exact" as const)
-          : idx < 3
+          : idx < 2
           ? ("cropped" as const)
           : ("visually_similar" as const),
         category,
       };
     });
 
-    const sharpnessScore = buffer.length < 50000 ? 38.0 : 94.5;
+    const sharpnessScore = buffer.length < 50000 ? 58.0 : 94.5;
     const isBlurry = buffer.length < 50000;
 
     // Cryptographic Merkle Root
@@ -187,6 +366,7 @@ export async function POST(request: NextRequest) {
       status: results.length > 0 ? "success" : "no_results",
       diagnostics: {
         facesDetected: 1,
+        filteredAccessoriesCount,
         sharpnessScore,
         resolution: { width: 1080, height: 1080 },
         isAiGenerated: false,

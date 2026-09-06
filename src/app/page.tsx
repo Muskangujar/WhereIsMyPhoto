@@ -30,38 +30,60 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const handleImageSelected = async (file: File | null, previewUrl: string) => {
+  const handleImageSelected = async (
+    file: File | null,
+    previewUrl: string,
+    faceCropUrl?: string,
+    detectionMeta?: {
+      confidence: number;
+      landmarksCount: number;
+    },
+    fullOriginalFile?: File | null
+  ) => {
     setErrorMessage(null);
     setSuccessMessage(null);
     setSelectedImage(previewUrl);
+
+    if (!file) {
+      // Waiting for face detection or user action
+      return;
+    }
+
     setIsScanning(true);
 
-    if (file) {
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("engine", activeEngine);
-        formData.append("apiKey", apiKey);
-
-        const res = await fetch("/api/scan", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || "Search pipeline failed to process image.");
-        }
-
-        const data: SearchResponse = await res.json();
-        setScanResult(data);
-        setSuccessMessage("Photo analyzed by Groq Vision and hashed successfully.");
-      } catch (err: any) {
-        console.error(err);
-        setErrorMessage(err.message || "An unexpected error occurred during search.");
-      } finally {
-        setIsScanning(false);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      if (fullOriginalFile && fullOriginalFile !== file) {
+        formData.append("fullFile", fullOriginalFile);
       }
+      formData.append("engine", activeEngine);
+      formData.append("apiKey", apiKey);
+
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Search pipeline failed to process image.");
+      }
+
+      const data: SearchResponse = await res.json();
+      setScanResult(data);
+      if (detectionMeta) {
+        setSuccessMessage(
+          `Face locked (${detectionMeta.landmarksCount} dlib landmarks, ${detectionMeta.confidence}% confidence). Background noise excluded.`
+        );
+      } else {
+        setSuccessMessage("Photo analyzed by Groq Vision and hashed successfully.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setErrorMessage(err.message || "An unexpected error occurred during search.");
+    } finally {
+      setIsScanning(false);
     }
   };
 
@@ -133,6 +155,7 @@ export default function Home() {
             <ResultsView
               results={scanResult.results}
               status={scanResult.status}
+              filteredAccessoriesCount={scanResult.diagnostics.filteredAccessoriesCount}
               onHandoffBlockchain={() => {
                 document
                   .getElementById("blockchain-section")

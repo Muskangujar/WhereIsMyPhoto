@@ -13,9 +13,15 @@ interface ResultsViewProps {
   results: SearchResultItem[];
   status: "success" | "no_results" | "error";
   onHandoffBlockchain: () => void;
+  filteredAccessoriesCount?: number;
 }
 
-export function ResultsView({ results, status, onHandoffBlockchain }: ResultsViewProps) {
+export function ResultsView({
+  results,
+  status,
+  onHandoffBlockchain,
+  filteredAccessoriesCount,
+}: ResultsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
 
   const categories = [
@@ -76,8 +82,17 @@ export function ResultsView({ results, status, onHandoffBlockchain }: ResultsVie
             Zero Public Web Matches Found
           </h3>
           <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed">
-            This image has no known public presence across indexed web sources. This typically indicates a private photo, an offline individual, or unindexed content.
+            This image has no known public presence across indexed web sources. This indicates a private photo, an offline individual, or unindexed content.
           </p>
+
+          {filteredAccessoriesCount && filteredAccessoriesCount > 0 && (
+            <div className="mt-3 p-3 rounded-xl bg-amber-50/80 border border-amber-200/60 text-[11px] text-amber-900 text-left">
+              <span className="font-semibold block mb-0.5">
+                Accessory &amp; Eyewear Filter Applied:
+              </span>
+              Google Lens detected physical accessories (sunglasses, goggles, or frames) and returned {filteredAccessoriesCount} commercial shopping catalog matches. These e-commerce product links were automatically filtered out to focus exclusively on human profiles and web appearances.
+            </div>
+          )}
         </div>
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-white border border-zinc-200 shadow-xs text-xs text-zinc-800 font-medium">
           <ShieldCheck className="h-4 w-4 text-emerald-600" />

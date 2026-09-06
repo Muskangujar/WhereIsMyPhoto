@@ -21,6 +21,7 @@ export interface ScanDiagnosticsData {
   isBlurry: boolean;
   sha256: string;
   perceptualHash: string;
+  filteredAccessoriesCount?: number;
   faceEncodingSample: number[];
   timestamp: string;
 }
