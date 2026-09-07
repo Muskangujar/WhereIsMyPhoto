@@ -136,6 +136,10 @@ TAMPER=1 RECORD_PATH="../$RECORD" npx hardhat run scripts/verify.ts --network lo
 npm run dev   # → http://localhost:3000
 ```
 
+> **For best results:** Upload the same photo (same file, same dimensions) that you have
+> publicly posted on social media. Resized, cropped, or re-exported versions of the same
+> image may not match the indexed copy and will return fewer or no results.
+
 Upload a face photo — the UI runs the scan pipeline and shows:
 - Real face detection + diagnostics (bounding box, sharpness, dHash, SHA-256)
 - Reverse-image search results with verification badges (face-verified / probable / visual-only)
