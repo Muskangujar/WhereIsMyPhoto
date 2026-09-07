@@ -25,6 +25,7 @@ export interface ScanDiagnosticsData {
   isBlurry: boolean;
   sha256: string;
   perceptualHash: string; // dHash
+  filteredAccessoriesCount?: number; // from friend's commerce filter
   faceEncodingSample: number[]; // first 8 of 128-D descriptor
   faceDescriptorHash?: string; // sha256 of full 128-D descriptor
   timestamp: string;

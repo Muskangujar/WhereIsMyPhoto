@@ -8,9 +8,15 @@ interface ResultsViewProps {
   results: SearchResultItem[];
   status: "success" | "no_results" | "error";
   onHandoffBlockchain: () => void;
+  filteredAccessoriesCount?: number;
 }
 
-export function ResultsView({ results, status, onHandoffBlockchain }: ResultsViewProps) {
+export function ResultsView({
+  results,
+  status,
+  onHandoffBlockchain,
+  filteredAccessoriesCount,
+}: ResultsViewProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
 
   const categories = [
@@ -70,6 +76,15 @@ export function ResultsView({ results, status, onHandoffBlockchain }: ResultsVie
             This image has no known public presence across indexed web sources.
             This typically indicates a private photo, an offline individual, or unindexed content.
           </p>
+
+          {filteredAccessoriesCount && filteredAccessoriesCount > 0 && (
+            <div className="mt-3 p-3 rounded-xl bg-amber-50/80 border border-amber-200/60 text-[11px] text-amber-900 text-left">
+              <span className="font-semibold block mb-0.5">
+                Accessory &amp; Eyewear Filter Applied:
+              </span>
+              Google Lens detected physical accessories (sunglasses, goggles, or frames) and returned {filteredAccessoriesCount} commercial shopping catalog matches. These e-commerce product links were automatically filtered out to focus exclusively on human profiles and web appearances.
+            </div>
+          )}
         </div>
         <button
           onClick={onHandoffBlockchain}

@@ -14,7 +14,6 @@ env.bak/
 venv.bak/
 backend/
 
-
 # Next.js Build Output
 .next/
 frontend/.next/
@@ -36,9 +35,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-# lib/ and lib64/ are Python virtualenv dirs — only ignore at root level
+# Only ignore top-level lib/ (Python virtualenv) — NOT src/lib/
 /lib/
 /lib64/
+!src/lib/
 parts/
 sdist/
 var/
@@ -78,18 +78,14 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Face detection model weights (>50 MB) — run scripts/download-models.ts to create
+# Face detection model weights — run scripts/download-models.ts to populate
 models/
 
-# Blockchain attestation records with real data (may contain post URLs)
+# Blockchain attestation records (may contain post URLs / PII)
 attestations/
 
-# Chain compilation artifacts
+# Hardhat compilation artifacts and chain node_modules
 chain/artifacts/
 chain/cache/
 chain/typechain-types/
 chain/node_modules/
-
-# Fixtures (saved from real API calls — may contain PII)
-# Checked in only a safe example; delete and re-record if needed
-# fixtures/
