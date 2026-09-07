@@ -12,7 +12,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
-
+backend/
 
 # Next.js Build Output
 .next/
@@ -35,6 +35,7 @@ dist/
 downloads/
 eggs/
 .eggs/
+# Only ignore top-level lib/ (Python virtualenv) — NOT src/lib/
 /lib/
 /lib64/
 !src/lib/
@@ -76,3 +77,15 @@ pnpm-debug.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Face detection model weights — run scripts/download-models.ts to populate
+models/
+
+# Blockchain attestation records (may contain post URLs / PII)
+attestations/
+
+# Hardhat compilation artifacts and chain node_modules
+chain/artifacts/
+chain/cache/
+chain/typechain-types/
+chain/node_modules/

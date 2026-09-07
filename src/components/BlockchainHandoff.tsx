@@ -18,31 +18,53 @@ interface BlockchainHandoffProps {
   data: SearchResponse;
 }
 
+interface AttestResult {
+  txHash: string;
+  blockNumber: number;
+  merkleRoot: string;
+  recordId: string;
+  explorerUrl: string | null;
+  eip712Signature: string;
+}
+
+interface VerifyResult {
+  pass: boolean;
+  onChainRoot: string;
+  computedRoot: string;
+  attester: string;
+  eip712SignerMatch: boolean;
+}
+
 export function BlockchainHandoff({ data }: BlockchainHandoffProps) {
   const [copied, setCopied] = useState(false);
-  const [isMinting, setIsMinting] = useState(false);
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [blockNumber, setBlockNumber] = useState<number | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationPassed, setVerificationPassed] = useState<boolean | null>(null);
+  const [isAttesting, setIsAttesting] = useState(false);
+  const [attestResult, setAttestResult] = useState<AttestResult | null>(null);
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
+  const [attestError, setAttestError] = useState<string | null>(null);
+  const [isReVerifying, setIsReVerifying] = useState(false);
+
+  const topResult = data.results[0];
 
   const fullPayload = {
     standard: "WHEREISMYPHOTO_EIP712_ATTESTATION_V1",
     merkleRoot: data.blockchainPayload.merkleRoot,
+    recordId: data.blockchainPayload.recordId,
     attestation: {
       imageSha256: data.diagnostics.sha256,
-      perceptualHash: data.diagnostics.perceptualHash,
-      faceDetected: data.diagnostics.facesDetected > 0,
-      isAiGenerated: data.diagnostics.isAiGenerated,
+      facePerceptualHash: data.diagnostics.perceptualHash,
+      faceDescriptorHash: data.diagnostics.faceDescriptorHash,
+      facesDetected: data.diagnostics.facesDetected,
       discoveredMatchesCount: data.results.length,
+      verifiedMatchesCount: data.results.filter((r) => r.verification === "verified").length,
       timestamp: data.diagnostics.timestamp,
     },
     topMatchedPosts: data.results.slice(0, 5).map((r) => ({
       platform: r.source,
       domain: r.domain,
       url: r.url,
-      matchType: r.matchType,
-      similarityScore: r.similarity,
+      verification: r.verification,
+      similarityScore: r.faceDistance !== null ? r.similarity : null,
+      faceDistance: r.faceDistance,
     })),
   };
 
@@ -64,31 +86,67 @@ export function BlockchainHandoff({ data }: BlockchainHandoffProps) {
     URL.revokeObjectURL(url);
   };
 
-  const handleSimulateMint = () => {
-    setIsMinting(true);
-    setVerificationPassed(null);
-    setTimeout(() => {
-      setIsMinting(false);
-      const fakeTx = `0x${Array.from({ length: 64 }, () =>
-        Math.floor(Math.random() * 16).toString(16)
-      ).join("")}`;
-      const randomBlock = 6942000 + Math.floor(Math.random() * 5000);
-      setTxHash(fakeTx);
-      setBlockNumber(randomBlock);
-    }, 1200);
+  const handleAttest = async () => {
+    setIsAttesting(true);
+    setAttestError(null);
+    try {
+      const record = {
+        imageSha256: data.diagnostics.sha256,
+        faceDescriptorHash: data.diagnostics.faceDescriptorHash ?? data.diagnostics.perceptualHash,
+        postUrl: topResult?.url ?? "",
+        postImageSha256: "",
+        similarityScore: topResult?.similarity ?? 0,
+        timestampIso: data.diagnostics.timestamp,
+      };
+
+      const res = await fetch("/api/attest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record, network: "localhost" }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Attestation failed");
+      }
+
+      const { attestResult: att, verifyResult: ver } = await res.json();
+      setAttestResult(att);
+      setVerifyResult(ver);
+    } catch (err: unknown) {
+      setAttestError((err as Error).message);
+    } finally {
+      setIsAttesting(false);
+    }
   };
 
-  const handleReVerify = () => {
-    setIsVerifying(true);
-    setTimeout(() => {
-      setIsVerifying(false);
-      // Cryptographically verify: Merkle root matches payload imageSha256 and discovered matches
-      const isValid =
-        !!data.blockchainPayload.merkleRoot &&
-        !!data.diagnostics.sha256 &&
-        data.blockchainPayload.imageSha256 === data.diagnostics.sha256;
-      setVerificationPassed(isValid);
-    }, 800);
+  const handleReVerify = async () => {
+    setIsReVerifying(true);
+    try {
+      const record = {
+        imageSha256: data.diagnostics.sha256,
+        faceDescriptorHash: data.diagnostics.faceDescriptorHash ?? data.diagnostics.perceptualHash,
+        postUrl: topResult?.url ?? "",
+        postImageSha256: "",
+        similarityScore: topResult?.similarity ?? 0,
+        timestampIso: data.diagnostics.timestamp,
+      };
+
+      const res = await fetch("/api/attest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record, network: "localhost" }),
+      });
+
+      if (res.ok) {
+        const { verifyResult: ver } = await res.json();
+        setVerifyResult(ver);
+      }
+    } catch {
+      // silently retain existing verifyResult
+    } finally {
+      setIsReVerifying(false);
+    }
   };
 
   return (
@@ -101,151 +159,156 @@ export function BlockchainHandoff({ data }: BlockchainHandoffProps) {
           </div>
           <div>
             <h3 className="font-title text-2xl font-bold text-zinc-900 flex items-center gap-2">
-              <span>Blockchain Verification and Attestation</span>
+              <span>Blockchain Attestation</span>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-800 border border-zinc-200 font-sans font-medium">
-                EIP-712 Schema
+                EIP-712
               </span>
             </h3>
             <p className="text-xs text-zinc-500">
-              Tamper-evident cryptographic payload formatted for smart contracts and decentralized verification.
+              Tamper-evident Merkle-tree attestation — write-once on-chain record.
             </p>
           </div>
         </div>
-
-        {/* Actions */}
         <div className="flex items-center gap-2">
           <button
             onClick={handleCopy}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 text-xs font-medium text-zinc-800 transition-all cursor-pointer"
           >
-            {copied ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-emerald-600" />
-                <span>Copied Payload</span>
-              </>
-            ) : (
-              <>
-                <Copy className="h-3.5 w-3.5 text-zinc-600" />
-                <span>Copy JSON</span>
-              </>
-            )}
+            {copied ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span>Copied</span></> : <><Copy className="h-3.5 w-3.5 text-zinc-600" /><span>Copy JSON</span></>}
           </button>
-
           <button
             onClick={handleDownloadJson}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 text-white hover:bg-black text-xs font-semibold shadow-xs transition-all cursor-pointer"
           >
             <Download className="h-3.5 w-3.5" />
-            <span>Download Proof Certificate</span>
+            <span>Download Proof</span>
           </button>
         </div>
       </div>
 
-      {/* Visual Pipeline Flow */}
+      {/* Merkle Pipeline Visualization */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
         <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-1">
-          <span className="text-zinc-500 font-mono text-[10px] uppercase font-semibold">Step 1: Input Face Scan Hash</span>
-          <p className="font-semibold text-zinc-900">Face Scan &amp; pHash</p>
+          <span className="text-zinc-500 font-mono text-[10px] uppercase font-semibold">Step 1 — Image fingerprint</span>
+          <p className="font-semibold text-zinc-900">SHA-256 + dHash</p>
+          <p className="text-zinc-600 font-mono text-[11px] truncate">{data.diagnostics.sha256.slice(0, 24)}…</p>
+        </div>
+        <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-1">
+          <span className="text-zinc-500 font-mono text-[10px] uppercase font-semibold">Step 2 — Face embedding</span>
+          <p className="font-semibold text-zinc-900">{data.diagnostics.facesDetected} face{data.diagnostics.facesDetected !== 1 ? "s" : ""} → 128-D descriptor</p>
           <p className="text-zinc-600 font-mono text-[11px] truncate">
-            {data.diagnostics.perceptualHash}
+            {data.diagnostics.faceDescriptorHash?.slice(0, 24) ?? "n/a"}…
           </p>
         </div>
-
         <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-1">
-          <span className="text-zinc-500 font-mono text-[10px] uppercase font-semibold">Step 2: Discovered Social Posts</span>
-          <p className="font-semibold text-zinc-900">Public Endpoints</p>
-          <p className="text-zinc-600 font-mono text-[11px] truncate">
-            {data.results.length} Discovered Matches
-          </p>
-        </div>
-
-        <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200 space-y-1">
-          <span className="text-zinc-500 font-mono text-[10px] uppercase font-semibold">Step 3: On-Chain Merkle Root</span>
-          <p className="font-semibold text-zinc-900">Tamper-Evident Root</p>
+          <span className="text-zinc-500 font-mono text-[10px] uppercase font-semibold">Step 3 — Merkle root</span>
+          <p className="font-semibold text-zinc-900">6-leaf sorted-pair tree</p>
           <p className="text-zinc-700 font-mono text-[11px] truncate font-medium">
-            {data.blockchainPayload.merkleRoot}
+            {data.blockchainPayload.merkleRoot.slice(0, 24)}…
           </p>
         </div>
       </div>
 
-      {/* JSON Payload Code Block */}
+      {/* JSON Payload */}
       <div className="relative rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 text-zinc-100">
         <div className="px-4 py-2 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
           <div className="flex items-center gap-2">
             <FileCode className="h-4 w-4 text-zinc-300" />
-            <span className="text-zinc-300 font-medium">Standard Attestation Payload (EIP-712 Format)</span>
+            <span className="text-zinc-300 font-medium">Attestation Payload (EIP-712 V1)</span>
           </div>
-          <span className="text-[11px] text-zinc-400 font-mono">JSON / UTF-8</span>
+          <span className="text-[11px] font-mono">JSON / UTF-8</span>
         </div>
         <pre className="p-4 text-xs font-mono text-emerald-400/90 overflow-x-auto max-h-56">
           {payloadString}
         </pre>
       </div>
 
-      {/* Testnet Attestation & Interactive Re-Verification */}
-      <div className="pt-2 flex flex-col space-y-4 border-t border-zinc-200">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <span className="text-xs font-semibold text-zinc-900 block">
-              On-Chain Record &amp; Verification
-            </span>
-            <span className="text-[11px] text-zinc-500 block">
-              Anchor discovered social media data on blockchain ledger and re-verify tamper-evident proof
+      {/* Attest Button / Results */}
+      <div className="pt-2 border-t border-zinc-200 space-y-3">
+        {!attestResult && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-semibold text-zinc-900 block">Attest on Blockchain</span>
+              <span className="text-[11px] text-zinc-500 block">
+                Records the Merkle root on-chain (localhost Hardhat node by default).
+                Requires a running node + deployed contract — see README.
+              </span>
+            </div>
+            <button
+              onClick={handleAttest}
+              disabled={isAttesting}
+              className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 text-white hover:bg-black text-xs font-semibold transition-all disabled:opacity-50 flex-shrink-0 cursor-pointer"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>{isAttesting ? "Broadcasting…" : "Attest on-chain"}</span>
+            </button>
+          </div>
+        )}
+
+        {attestError && (
+          <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+            <strong>Attest error:</strong> {attestError}
+            <span className="block mt-1 text-red-500">
+              Is the Hardhat node running and contract deployed? See README.
             </span>
           </div>
+        )}
 
-          <div className="flex flex-wrap items-center gap-2">
-            {!txHash ? (
-              <button
-                onClick={handleSimulateMint}
-                disabled={isMinting}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer shadow-xs"
-              >
-                <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                <span>{isMinting ? "Anchoring on Blockchain..." : "Upload & Attest to Blockchain"}</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-mono text-emerald-800 font-medium">
-                  <Check className="h-4 w-4 text-emerald-600" />
-                  <span className="truncate max-w-[220px]">Tx: {txHash}</span>
-                  {blockNumber && (
-                    <span className="text-[10px] text-emerald-600 font-normal">
-                      (Block #{blockNumber})
-                    </span>
-                  )}
+        {attestResult && verifyResult && (
+          <div className="space-y-3">
+            <div className={`p-3.5 rounded-xl border text-xs font-mono space-y-1 ${verifyResult.pass ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  {verifyResult.pass
+                    ? <><Check className="h-4 w-4 text-emerald-600" /><span className="text-emerald-800">On-chain attestation VERIFIED</span></>
+                    : <span className="text-red-800">Verification FAILED</span>}
                 </div>
-
                 <button
                   onClick={handleReVerify}
-                  disabled={isVerifying}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                  disabled={isReVerifying}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 text-white hover:bg-zinc-700 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-50"
                 >
-                  <RotateCcw className={`h-3.5 w-3.5 ${isVerifying ? "animate-spin" : ""}`} />
-                  <span>{isVerifying ? "Verifying..." : "Re-Verify Record"}</span>
+                  <RotateCcw className={`h-3 w-3 ${isReVerifying ? "animate-spin" : ""}`} />
+                  <span>{isReVerifying ? "Verifying…" : "Re-Verify"}</span>
                 </button>
               </div>
-            )}
-          </div>
-        </div>
+              <p className="text-zinc-600 truncate">Tx: {attestResult.txHash}</p>
+              <p className="text-zinc-600">Block: {attestResult.blockNumber}</p>
+              <p className="text-zinc-600 truncate">recordId: {attestResult.recordId}</p>
+              <p className="text-zinc-600">Attester: {verifyResult.attester}</p>
+              <p className="text-zinc-600">EIP-712 signer match: {verifyResult.eip712SignerMatch ? "✓" : "✗"}</p>
+              {attestResult.explorerUrl && (
+                <a
+                  href={attestResult.explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  View on PolygonScan
+                </a>
+              )}
+            </div>
 
-        {/* Live Re-Verification Banner (Demonstrates task requirement) */}
-        {verificationPassed === true && (
-          <div className="p-4 rounded-xl bg-emerald-50/90 border border-emerald-300/80 text-emerald-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
-            <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
-              <div>
-                <span className="font-bold text-emerald-950 block">
-                  Re-Verification Succeeded: On-Chain Record Matches Exactly
-                </span>
-                <span className="text-[11px] text-emerald-800">
-                  Input Face SHA-256 and {data.results.length} Discovered Social Post Hashes match on-chain Merkle Root ({data.blockchainPayload.merkleRoot.slice(0, 16)}...). Tamper-evident proof confirmed.
+            {/* Re-verification success banner */}
+            {verifyResult.pass && (
+              <div className="p-4 rounded-xl bg-emerald-50/90 border border-emerald-300/80 text-emerald-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+                  <div>
+                    <span className="font-bold text-emerald-950 block">
+                      On-Chain Record Matches Exactly
+                    </span>
+                    <span className="text-[11px] text-emerald-800">
+                      Image SHA-256 and {data.results.length} discovered match hashes align with on-chain Merkle root ({data.blockchainPayload.merkleRoot.slice(0, 16)}…). Tamper-evident proof confirmed.
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-bold whitespace-nowrap">
+                  STATUS: VALID
                 </span>
               </div>
-            </div>
-            <span className="text-[10px] font-mono px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-bold whitespace-nowrap">
-              STATUS: 100% VALID
-            </span>
+            )}
           </div>
         )}
       </div>

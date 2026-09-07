@@ -1,273 +1,64 @@
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
+import { getImageDiagnostics } from "@/lib/diagnostics";
+import { detectFaces, cropFace, descriptorHash } from "@/lib/face";
+import { searchWithLens, LensCandidate } from "@/lib/search";
+import { verifyCandidates } from "@/lib/verify-face";
+import type { SearchResponse } from "@/types";
 
-async function uploadToPublicCDN(buffer: Buffer, mimeType: string): Promise<string | null> {
-  const ext = mimeType.split("/")[1] || "jpg";
-  const filename = `scan-${Date.now()}.${ext}`;
-
-  // Provider 1: Catbox.moe (Direct static CDN easily crawled by Google Lens)
-  try {
-    const fd = new FormData();
-    fd.append("reqtype", "fileupload");
-    fd.append("fileToUpload", new Blob([new Uint8Array(buffer)], { type: mimeType }), filename);
-
-    const res = await fetch("https://catbox.moe/user/api.php", {
-      method: "POST",
-      body: fd,
-    });
-
-    if (res.ok) {
-      const url = (await res.text()).trim();
-      if (url.startsWith("http")) {
-        return url;
-      }
-    }
-  } catch (err) {
-    console.warn("Catbox upload failed, trying fallback:", err);
-  }
-
-  // Provider 2: Freeimage.host API (public fallback)
-  try {
-    const base64 = buffer.toString("base64");
-    const fd = new FormData();
-    fd.append("key", "6d207e02198a847aa98d0a2a901485a5"); // standard free public key
-    fd.append("action", "upload");
-    fd.append("source", base64);
-    fd.append("format", "json");
-
-    const res = await fetch("https://freeimage.host/api/1/upload", {
-      method: "POST",
-      body: fd,
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      if (json?.image?.url) {
-        return json.image.url;
-      }
-    }
-  } catch (err) {
-    console.warn("Freeimage upload failed:", err);
-  }
-
-  return null;
-}
-
-async function querySerperLens(imageUrl: string, apiKey: string): Promise<any[]> {
-  try {
-    const res = await fetch("https://google.serper.dev/lens", {
-      method: "POST",
-      headers: {
-        "X-API-KEY": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ url: imageUrl }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.organic)) {
-        return data.organic;
-      }
-    } else {
-      console.warn("Serper Lens API response not ok:", await res.text());
-    }
-  } catch (err) {
-    console.error("Serper Lens query failed:", err);
-  }
-  return [];
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    const fullFile = formData.get("fullFile") as File | null;
-    const clientApiKey = (formData.get("apiKey") as string) || "";
-
-    if (!file) {
-      return NextResponse.json(
-        { error: "No image file provided. Please upload an image." },
-        { status: 400 }
-      );
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const mimeType = file.type || "image/jpeg";
-    const base64Image = buffer.toString("base64");
-    const dataUrl = `data:${mimeType};base64,${base64Image}`;
-
-    // Calculate Cryptographic Hashes
-    const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
-    const perceptualHash = crypto
-      .createHash("md5")
-      .update(buffer.subarray(0, Math.min(buffer.length, 8192)))
-      .digest("hex")
-      .slice(0, 16);
-
-    const serperKey =
-      clientApiKey ||
-      process.env.SERPER_API_KEY ||
-      process.env.SERPER_API ||
-      "634c23f08b4b220341b8adffd9104f4b84fd1fe8";
-
-    let rawMatches: any[] = [];
-
-    if (serperKey) {
-      // Stage 1: Upload primary target (face crop) and query Google Lens
-      const primaryUrl = await uploadToPublicCDN(buffer, mimeType);
-      console.log("Stage 1 primary image CDN URL:", primaryUrl);
-
-      if (primaryUrl) {
-        const stage1Results = await querySerperLens(primaryUrl, serperKey);
-        rawMatches = stage1Results;
-      }
-
-      // Stage 2: Fallback to full image if face crop yielded 0 matches and fullFile is provided
-      if (rawMatches.length === 0 && fullFile) {
-        const fullBuffer = Buffer.from(await fullFile.arrayBuffer());
-        const fullMime = fullFile.type || "image/jpeg";
-        const fullUrl = await uploadToPublicCDN(fullBuffer, fullMime);
-        console.log("Stage 2 full image fallback CDN URL:", fullUrl);
-
-        if (fullUrl) {
-          const stage2Results = await querySerperLens(fullUrl, serperKey);
-          rawMatches = stage2Results;
-        }
-      }
-    }
-
-function isCommerceOrAccessory(item: any): boolean {
+function isCommerceOrAccessory(item: LensCandidate): boolean {
   const title = (item.title || "").toLowerCase();
   const snippet = (item.snippet || "").toLowerCase();
-  const link = (item.link || "").toLowerCase();
+  const url = (item.url || "").toLowerCase();
   const source = (item.source || "").toLowerCase();
-  const text = `${title} ${snippet} ${link} ${source}`.toLowerCase();
+  const text = `${title} ${snippet} ${url} ${source}`;
 
-  // 1. E-commerce shopping URL paths
+  // E-commerce shopping URL paths
   if (
-    link.includes("/products/") ||
-    link.includes("/product/") ||
-    link.includes("/item/") ||
-    link.includes("/items/") ||
-    link.includes("/p/") ||
-    link.includes("/pd/") ||
-    link.includes("/dp/") ||
-    link.includes("/gp/") ||
-    link.includes("/shop/") ||
-    link.includes("/cart/") ||
-    link.includes("/stores/") ||
-    link.includes("/buy/")
+    url.includes("/products/") ||
+    url.includes("/product/") ||
+    url.includes("/item/") ||
+    url.includes("/items/") ||
+    url.includes("/p/") ||
+    url.includes("/pd/") ||
+    url.includes("/dp/") ||
+    url.includes("/gp/") ||
+    url.includes("/shop/") ||
+    url.includes("/cart/") ||
+    url.includes("/stores/") ||
+    url.includes("/buy/")
   ) {
     return true;
   }
 
-  // 2. Commercial / Retail / Shopping domains
+  // Commercial / Retail / Shopping domains
   const shoppingDomains = [
-    "bobleisure",
-    "amazon",
-    "walmart",
-    "ebay",
-    "aliexpress",
-    "temu",
-    "shein",
-    "dhgate",
-    "target.com",
-    "etsy",
-    "mercari",
-    "grailed",
-    "zalando",
-    "dillard",
-    "farfetch",
-    "harrods",
-    "ashford",
-    "wmpeyewear",
-    "alensa",
-    "shadestation",
-    "revantoptics",
-    "safetyglasses",
-    "frameandoptic",
-    "blenderseyewear",
-    "smithoptics",
-    "otticamauro",
-    "trendhim",
-    "metalshop",
-    "handicraft",
-    "ubuy",
-    "desertcart",
-    "footy.com",
-    "openbox",
-    "optimaloptic",
-    "twelveweight",
-    "knockaround",
-    "super-shop",
-    "jlmatthews",
-    "bedbathandbeyond",
-    "faire.com",
-    "wye-delta",
-    "sportisimo",
-    "nordstrom",
-    "trendyol",
-    "amevista",
-    "styliafoe",
-    "dalessandro",
-    "twenty4action",
-    "hawkersco",
-    "pinibike",
-    "bloemenverlinde",
-    "noon.com",
-    "intialpaca",
-    "shades",
-    "optical",
-    "optics",
-    "eyewear",
-    "sunglass",
-    "goggle",
+    "bobleisure", "amazon", "walmart", "ebay", "aliexpress", "temu", "shein",
+    "dhgate", "target.com", "etsy", "mercari", "grailed", "zalando", "dillard",
+    "farfetch", "harrods", "ashford", "wmpeyewear", "alensa", "shadestation",
+    "revantoptics", "safetyglasses", "frameandoptic", "blenderseyewear",
+    "smithoptics", "otticamauro", "trendhim", "metalshop", "handicraft", "ubuy",
+    "desertcart", "footy.com", "openbox", "optimaloptic", "twelveweight",
+    "knockaround", "super-shop", "jlmatthews", "bedbathandbeyond", "faire.com",
+    "wye-delta", "sportisimo", "nordstrom", "trendyol", "amevista", "styliafoe",
+    "dalessandro", "twenty4action", "hawkersco", "pinibike", "bloemenverlinde",
+    "noon.com", "intialpaca", "shades", "optical", "optics", "eyewear",
+    "sunglass", "goggle",
   ];
-  if (shoppingDomains.some((d) => link.includes(d) || source.includes(d))) {
+  if (shoppingDomains.some((d) => url.includes(d) || source.includes(d))) {
     return true;
   }
 
-  // 3. Product / Gear / Apparel keywords
+  // Product / Gear / Apparel keywords
   const productWords = [
-    "sunglass",
-    "goggle",
-    "eyewear",
-    "eyeglass",
-    "spectacle",
-    "glass",
-    "shade",
-    "optic",
-    "lens",
-    "gafas",
-    "occhiali",
-    "polarized",
-    "muffler",
-    "scarf",
-    "shemagh",
-    "keffiyeh",
-    "jacket",
-    "coat",
-    "parka",
-    "fleece",
-    "hoodie",
-    "shirt",
-    "pants",
-    "trousers",
-    "gear",
-    "accessoire",
-    "accessory",
-    "accessories",
-    "fishing",
-    "hunting",
-    "apparel",
-    "clothing",
-    "wholesale",
-    "buy online",
-    "price",
-    "in stock",
-    "free shipping",
-    "order now",
+    "sunglass", "goggle", "eyewear", "eyeglass", "spectacle", "glass", "shade",
+    "optic", "lens", "gafas", "occhiali", "polarized", "muffler", "scarf",
+    "shemagh", "keffiyeh", "jacket", "coat", "parka", "fleece", "hoodie",
+    "shirt", "pants", "trousers", "gear", "accessoire", "accessory",
+    "accessories", "fishing", "hunting", "apparel", "clothing", "wholesale",
+    "buy online", "price", "in stock", "free shipping", "order now",
   ];
   if (productWords.some((w) => text.includes(w))) {
     return true;
@@ -276,124 +67,178 @@ function isCommerceOrAccessory(item: any): boolean {
   return false;
 }
 
-    // Deduplicate by URL
-    const seenUrls = new Set<string>();
-    const uniqueMatches = rawMatches.filter((item) => {
-      const link = item.link || "";
-      if (!link || seenUrls.has(link)) return false;
-      seenUrls.add(link);
-      return true;
-    });
+export async function POST(request: NextRequest) {
+  try {
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    const fullFile = formData.get("fullFile") as File | null;
 
-    // Filter out all e-commerce products, shopping gear, and accessories
-    const filteredMatches = uniqueMatches.filter((item) => !isCommerceOrAccessory(item));
-    const filteredAccessoriesCount = uniqueMatches.length - filteredMatches.length;
+    if (!file) {
+      return NextResponse.json(
+        { error: "No image file provided." },
+        { status: 400 }
+      );
+    }
 
-    // Format discovered results cleanly
-    const results = filteredMatches.slice(0, 15).map((item, idx) => {
-      const link = item.link || "";
-      let domain = "web.org";
-      try {
-        if (link) domain = new URL(link).hostname.replace("www.", "");
-      } catch {}
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const mimeType = file.type || "image/jpeg";
 
-      const source = item.source || domain;
+    // ── Real diagnostics ──────────────────────────────────────────────
+    const diag = await getImageDiagnostics(buffer);
 
-      let category: "social" | "news" | "blog" | "portfolio" = "portfolio";
-      const isSocialProfile =
-        domain.includes("linkedin.com") ||
-        domain.includes("instagram.com") ||
-        domain.includes("twitter.com") ||
-        domain.includes("x.com") ||
-        domain.includes("facebook.com") ||
-        domain.includes("pinterest.com") ||
-        domain.includes("reddit.com") ||
-        domain.includes("github.com") ||
-        domain.includes("threads.net") ||
-        domain.includes("youtube.com");
+    // ── Real face detection ───────────────────────────────────────────
+    const faces = await detectFaces(buffer);
 
-      if (isSocialProfile) {
-        category = "social";
-      } else if (
-        domain.includes("news") ||
-        domain.includes("bbc") ||
-        domain.includes("forbes") ||
-        domain.includes("medium.com") ||
-        domain.includes("techcrunch")
-      ) {
-        category = "news";
-      } else if (domain.includes("blog") || domain.includes("wordpress") || domain.includes("substack")) {
-        category = "blog";
-      }
+    if (faces.length === 0) {
+      return NextResponse.json(
+        {
+          queryId: `scan_${Date.now()}`,
+          status: "no_results",
+          diagnostics: {
+            facesDetected: 0,
+            sharpnessScore: diag.sharpnessScore,
+            resolution: { width: diag.width, height: diag.height },
+            isAiGenerated: false,
+            aiConfidence: 0,
+            isBlurry: diag.isBlurry,
+            sha256: diag.sha256,
+            perceptualHash: diag.dHash,
+            faceEncodingSample: [],
+            timestamp: new Date().toISOString(),
+          },
+          results: [],
+          blockchainPayload: {
+            schemaVersion: "eip712-whereismyphoto-v1",
+            merkleRoot: "0x" + "0".repeat(64),
+            imageSha256: diag.sha256,
+            facePerceptualHash: diag.dHash,
+            discoveredCount: 0,
+            topMatchesHashes: [],
+            timestampIso: new Date().toISOString(),
+          },
+        } satisfies SearchResponse,
+        { status: 200 }
+      );
+    }
 
-      // Only true profile matches receive exact match status
-      const isExactProfile = isSocialProfile && (link.includes("/in/") || link.includes("/user/") || link.includes("/profile/"));
-      const similarity = isExactProfile
-        ? 96.5
-        : Math.max(72, Math.min(91, 88.0 - idx * 2.0));
+    const primaryFace = faces[0];
+    const faceHash = descriptorHash(primaryFace.descriptor);
 
-      return {
-        id: `res-lens-${idx + 1}`,
-        source,
-        domain,
-        url: link,
-        title: item.title || "Public Page with Matching Photo",
-        snippet: item.snippet || `Indexed visual appearance on ${domain}.`,
-        thumbnail: item.thumbnailUrl || item.imageUrl || dataUrl,
-        similarity,
-        matchType: isExactProfile
-          ? ("exact" as const)
-          : idx < 2
-          ? ("cropped" as const)
-          : ("visually_similar" as const),
-        category,
-      };
-    });
+    // Crop face for second Lens query
+    const faceCrop = await cropFace(buffer, primaryFace.box).catch(() => null);
 
-    const sharpnessScore = buffer.length < 50000 ? 58.0 : 94.5;
-    const isBlurry = buffer.length < 50000;
+    // ── Real search ───────────────────────────────────────────────────
+    const serperKey = process.env.SERPER_API_KEY;
+    const offline = !serperKey;
 
-    // Cryptographic Merkle Root
-    const merkleRoot =
-      "0x" +
-      crypto
-        .createHash("sha256")
-        .update(sha256 + perceptualHash + results.length.toString())
-        .digest("hex");
+    // If primary face crop yielded no candidates, fall back to full image buffer
+    let candidates = await searchWithLens(
+      buffer,
+      faceCrop,
+      mimeType,
+      serperKey,
+      offline
+    );
+
+    if (candidates.length === 0 && fullFile) {
+      const fullBuffer = Buffer.from(await fullFile.arrayBuffer());
+      candidates = await searchWithLens(
+        fullBuffer,
+        null,
+        fullFile.type || "image/jpeg",
+        serperKey,
+        offline
+      );
+    }
+
+    // Apply commerce / accessory filter (friend's additive feature)
+    const preFilterCount = candidates.length;
+    const filteredCandidates = candidates.filter((c) => !isCommerceOrAccessory(c));
+    const filteredAccessoriesCount = preFilterCount - filteredCandidates.length;
+
+    // ── Face-verified matching ────────────────────────────────────────
+    const verified = await verifyCandidates(filteredCandidates.slice(0, 15), primaryFace);
+    const timestampIso = new Date().toISOString();
+
+    const results = verified.slice(0, 15).map((v, idx) => ({
+      id: `res-lens-${idx + 1}`,
+      source: v.candidate.source ?? v.domain,
+      domain: v.domain,
+      url: v.candidate.url,
+      title: v.candidate.title ?? "Public Page with Matching Photo",
+      snippet: v.candidate.snippet ?? `Indexed visual appearance on ${v.domain}.`,
+      thumbnail: v.candidate.thumbnailUrl ?? v.candidate.imageUrl ?? "",
+      similarity: v.similarityPct ?? 0,
+      matchType: (
+        v.verification === "verified"
+          ? "exact"
+          : v.verification === "probable"
+          ? "cropped"
+          : "visually_similar"
+      ) as "exact" | "cropped" | "visually_similar",
+      category: v.category,
+      verification: v.verification,
+      faceDistance: v.faceDistance,
+    }));
+
+    // ── Merkle root ───────────────────────────────────────────────────
+    const { buildDiscoveryMerkle } = await import("@/lib/merkle");
+    const topMatch = verified[0];
+    const merklePayload = topMatch
+      ? buildDiscoveryMerkle({
+          imageSha256: diag.sha256,
+          faceDescriptorHash: faceHash,
+          postUrl: topMatch.candidate.url,
+          postImageSha256: topMatch.postImageSha256 ?? "",
+          similarityScore: topMatch.similarityPct ?? 0,
+          timestampIso,
+        })
+      : null;
 
     return NextResponse.json({
       queryId: `scan_${Date.now()}`,
       status: results.length > 0 ? "success" : "no_results",
       diagnostics: {
-        facesDetected: 1,
+        facesDetected: faces.length,
+        faceBoundingBox: primaryFace.box,
         filteredAccessoriesCount,
-        sharpnessScore,
-        resolution: { width: 1080, height: 1080 },
+        sharpnessScore: diag.sharpnessScore,
+        resolution: { width: diag.width, height: diag.height },
         isAiGenerated: false,
-        aiConfidence: 1.8,
-        isBlurry,
-        sha256,
-        perceptualHash,
-        faceEncodingSample: [0.0412, -0.1198, 0.0823, -0.0512, 0.0934, -0.0124],
-        timestamp: new Date().toISOString(),
+        aiConfidence: 0,
+        isBlurry: diag.isBlurry,
+        sha256: diag.sha256,
+        perceptualHash: diag.dHash,
+        faceEncodingSample: Array.from(primaryFace.descriptor.slice(0, 8)).map(
+          (f) => parseFloat(f.toFixed(4))
+        ),
+        faceDescriptorHash: faceHash,
+        timestamp: timestampIso,
       },
       results,
       blockchainPayload: {
         schemaVersion: "eip712-whereismyphoto-v1",
-        merkleRoot,
-        imageSha256: sha256,
-        facePerceptualHash: perceptualHash,
+        merkleRoot: merklePayload?.merkleRoot ?? "0x" + "0".repeat(64),
+        recordId: merklePayload?.recordId,
+        imageSha256: diag.sha256,
+        facePerceptualHash: diag.dHash,
+        faceDescriptorHash: faceHash,
         discoveredCount: results.length,
-        topMatchesHashes: results.slice(0, 5).map((r) =>
-          "0x" + crypto.createHash("sha256").update(r.url).digest("hex")
-        ),
-        timestampIso: new Date().toISOString(),
+        topMatchesHashes: results
+          .slice(0, 5)
+          .map((r) =>
+            "0x" +
+            Buffer.from(
+              new TextEncoder().encode(r.url)
+            ).toString("hex").slice(0, 64)
+          ),
+        timestampIso,
       },
-    });
-  } catch (error: any) {
-    console.error("Scan processing error:", error);
+    } satisfies SearchResponse);
+  } catch (error: unknown) {
+    console.error("Scan error:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to process image scan" },
+      { error: (error as Error).message ?? "Failed to process scan" },
       { status: 500 }
     );
   }

@@ -1,230 +1,251 @@
 # WhereIsMyPhoto
 
-WhereIsMyPhoto is an open-source reverse image search engine and cryptographic attestation pipeline designed to discover public web and social media footprints of uploaded photographs.
+**Face-scan → reverse-image search → face-embedding verification → Merkle attestation on-chain → re-verification.**
 
-The system allows users to upload a photo, performs a live visual search across indexed public internet pages (including LinkedIn, X, Instagram, Pinterest, Reddit, blogs, and news platforms), and generates a verifiable, tamper-evident cryptographic attestation payload (SHA-256, perceptual hash, and Merkle root) ready for blockchain testnet recording.
-
----
-
-## Critical System Principle
-
-This system is an image footprint search engine, not a personal surveillance or person-identification system.
-
-The pipeline searches for occurrences of the uploaded photo, modified copies, or visually similar crops across the public web. It does not maintain a surveillance database of private identities, does not track individuals, and strictly enforces anti-stalking terms of use.
+Built for HH Goa 2026 Shortlisting Task 3.
 
 ---
 
-## Core Pipeline Architecture
+## Architecture
 
 ```
-[ User Photo Upload ]
-         |
-         v
-[ Cryptographic Hashing ]
-   - SHA-256 File Digest
-   - Perceptual Hash (pHash)
-   - Resolution and Sharpness Screening
-         |
-         +-------------------------------------+
-         |                                     |
-         v                                     v
-[ Google Lens via Serper API ]      [ Groq Vision & LLM Engine ]
-   - Live Public Web Crawl             - Synthetic AI / Deepfake Screening
-   - Social Media Profile Discovery    - Footprint Entity Verification
-   - Exact and Cropped Match URLs      - Quality and Anomaly Scoring
-         |                                     |
-         +------------------+------------------+
-                            |
-                            v
-              [ Merkle Root Aggregator ]
-                            |
-                            v
-          [ Blockchain Attestation Payload ]
-   - EIP-712 Standard Attestation Object
-   - SHA-256 Digest and Merkle Root
-   - Discovered Web Match Endpoints
-   - 1-Click JSON Export and Testnet Minting
-```
-
----
-
-## Key Features
-
-1. Live Reverse Image Search:
-   Queries Google Lens via Serper API to crawl billions of public internet pages and locate matching images on LinkedIn, X, Instagram, Pinterest, Reddit, company directories, and news publications.
-
-2. Edge-Case Diagnostics:
-   - Private and Non-Web Persons: Detects photos with zero public exposure, providing a verified zero-footprint attestation.
-   - Synthetic AI and Deepfake Screening: Identifies generative AI artifacts and diffusion anomalies.
-   - Quality and Sharpness Analysis: Automatically scores image clarity and flags blurry inputs.
-   - Image Cropping Resilience: Uses perceptual hashing (pHash) to detect resized, compressed, or cropped editions.
-
-3. Blockchain Verification Handoff:
-   Computes a deterministic Merkle Root from the image SHA-256 digest, perceptual hash, and discovered public URLs. Exports a standardized EIP-712 JSON payload ready for integration with EVM smart contracts, Solana programs, or testnet minting.
-
-4. Modern Responsive Interface:
-   Built with Next.js (App Router), React, TypeScript, and Tailwind CSS. Features an interactive 3D Cobe Globe in a high-contrast white aesthetic with Cormorant Garamond typography.
-
-5. Ethical Safeguards:
-   Dedicated Terms of Service with a strict anti-stalking clause and a Privacy Policy enforcing transient, zero-retention memory processing.
-
----
-
-## Technology Stack
-
-- Framework: Next.js 16 (App Router)
-- Language: TypeScript
-- Styling: Tailwind CSS
-- 3D Visualization: Cobe (Interactive WebGL Globe)
-- Reverse Image Search: Serper API (Google Lens)
-- AI Analysis: Groq API
-- Cryptography: Node.js Crypto (SHA-256, MD5 pHash, Merkle Root)
-- Icons: Lucide React
-
----
-
-## Project Structure
-
-```
-face-search-hackathon/
-├── .env                          # Root environment configuration
-├── .gitignore                    # Git ignore file for Python and Node.js
-├── README.md                     # Project documentation
-├── requirements.txt              # Optional Python backend dependencies
-├── app.py                        # Optional standalone Python script
-└── frontend/
-    ├── .env.local                # Frontend API keys (Serper, Groq)
-    ├── package.json              # Node dependencies
-    ├── next.config.ts            # Next.js configuration
-    ├── tsconfig.json             # TypeScript configuration
-    └── src/
-        ├── app/
-            ├── layout.tsx        # Typography, SEO metadata, Root Layout
-            ├── page.tsx          # Main Search Engine Workspace
-            ├── icon.tsx          # Dynamic SVG smile favicon
-            ├── globals.css       # Clean monochrome styles
-            ├── terms/page.tsx    # Terms of Service and Anti-Stalking Policy
-            ├── privacy/page.tsx  # Privacy Policy and Zero-Storage Policy
-            ├── not-found.tsx     # Custom 404 Page
-            └── api/
-                └── scan/
-                    └── route.ts  # Live Google Lens, Groq, and Hashing API
-        ├── components/
-            ├── Navbar.tsx        # Navigation header
-            ├── HeroSection.tsx   # Hero with interactive 3D Cobe Globe
-            ├── ImageUploader.tsx # Drag and drop image uploader
-            ├── EmptyState.tsx    # Initial empty state guide
-            ├── ScanDiagnostics.tsx # Edge-case screening metrics
-            ├── ResultsView.tsx   # Discovered public matches grid
-            ├── BlockchainHandoff.tsx # Merkle tree viewer and JSON export
-            ├── ApiSettingsModal.tsx  # API engine selector modal
-            └── ui/
-                ├── cobe-globe.tsx # 3D WebGL Globe component
-                └── demo.tsx       # Standalone globe preview
-        ├── lib/
-            └── utils.ts          # Tailwind class merger utility
-        └── types/
-            └── index.ts          # TypeScript interfaces
+            ┌─────────────────────────────────────────────────────────────────┐
+            │                        INPUT IMAGE                              │
+            └───────────────────────────┬─────────────────────────────────────┘
+                                        │
+                    ┌───────────────────▼─────────────────────┐
+                    │         PHASE 1 — Face Detection         │
+                    │   @vladmandic/face-api + TF.js WASM      │
+                    │   → 128-D descriptor · bounding box       │
+                    │   → Laplacian variance sharpness          │
+                    │   → dHash · SHA-256                       │
+                    └───────────────────┬─────────────────────┘
+                                        │ face crop
+                    ┌───────────────────▼─────────────────────┐
+                    │      PHASE 2 — Reverse Image Search      │
+                    │   Full image + face crop → Litterbox     │
+                    │   (1-hour temporary CDN, auto-expires)    │
+                    │   → Google Lens (Serper) × 2 queries      │
+                    │   → Merge + deduplicate results           │
+                    └───────────────────┬─────────────────────┘
+                                        │ candidate URLs
+                    ┌───────────────────▼─────────────────────┐
+                    │    PHASE 2 — Embedding Verification      │
+                    │  Fetch each candidate image (5s timeout) │
+                    │  Run face detection + 128-D descriptor    │
+                    │  Euclidean distance to input face         │
+                    │  ≤0.50 = verified · 0.50–0.60 = probable │
+                    │  Sort verified first, display real %      │
+                    └───────────────────┬─────────────────────┘
+                                        │ best verified match
+                    ┌───────────────────▼─────────────────────┐
+                    │      PHASE 3 — Merkle Tree Building      │
+                    │  6 leaves (keccak256 per field):          │
+                    │  imageSha256 · faceDescHash · postUrl     │
+                    │  postImageSha256 · similarity · timestamp │
+                    │  Sorted-pair hashing (tamper-evident)     │
+                    │  recordId = keccak256(canonical JSON)     │
+                    └───────────────────┬─────────────────────┘
+                                        │ merkleRoot + recordId
+                    ┌───────────────────▼─────────────────────┐
+                    │  PHASE 3 — On-chain Attestation          │
+                    │  AttestationRegistry.attest(id, root)    │
+                    │  Write-once (reverts on duplicate)        │
+                    │  + EIP-712 signed by attesting wallet     │
+                    └───────────────────┬─────────────────────┘
+                                        │ txHash
+                    ┌───────────────────▼─────────────────────┐
+                    │  PHASE 3 — On-chain Re-verification      │
+                    │  Recompute root from record fields        │
+                    │  getAttestation(recordId) from chain      │
+                    │  Compare roots + recover EIP-712 signer   │
+                    │  PASS / FAIL printed with both roots      │
+                    └─────────────────────────────────────────┘
 ```
 
 ---
 
-## Getting Started
+## Quick Start (localhost demo)
 
 ### Prerequisites
+- Node.js 18+ (tested on Node 22)
+- npm 9+
 
-- Node.js version 18 or higher (Node 22 recommended)
-- npm version 9 or higher
+### 1 — Install dependencies
 
-### Installation
+```bash
+# Root Next.js project
+npm install
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/face-search-hackathon.git
-   cd face-search-hackathon
-   ```
-
-2. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-4. Configure environment variables in `frontend/.env.local`:
-   ```env
-   SERPER_API_KEY="your_serper_api_key_here"
-   GROQ_API_KEY="your_groq_api_key_here"
-   ```
-
-5. Start the development server:
-   ```bash
-   npm run dev
-   ```
-
-6. Open your browser and visit:
-   `http://localhost:3000`
-
----
-
-## API Keys Guide
-
-| Provider | Purpose | Free Tier | Registration Link |
-| :--- | :--- | :--- | :--- |
-| Serper API | Live Google Lens reverse image lookup | 2,500 free queries on signup | https://serper.dev |
-| Groq API | Fast AI verification and footprint analysis | 100% free access | https://console.groq.com |
-| Google Cloud Vision | Alternative enterprise web detection | 1,000 free requests per month | https://console.cloud.google.com |
-
----
-
-## Blockchain Verification Payload Format
-
-When a photo is analyzed, the system outputs an EIP-712 compatible JSON payload structured as follows:
-
-```json
-{
-  "standard": "WHEREISMYPHOTO_EIP712_ATTESTATION_V1",
-  "merkleRoot": "0x7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
-  "attestation": {
-    "imageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "perceptualHash": "a1f09c3e87b21d54",
-    "faceDetected": true,
-    "isAiGenerated": false,
-    "discoveredMatchesCount": 4,
-    "timestamp": "2026-09-05T17:00:00.000Z"
-  },
-  "topMatchedPosts": [
-    {
-      "platform": "LinkedIn",
-      "domain": "linkedin.com",
-      "url": "https://linkedin.com/in/example-profile",
-      "matchType": "exact",
-      "similarityScore": 98.4
-    }
-  ]
-}
+# Hardhat blockchain project (separate package, keeps Next.js build clean)
+cd chain && npm install && cd ..
 ```
 
-This payload can be copied directly or downloaded as a `.json` certificate file for smart contract hashing and verification.
+No model download needed — face-api model weights (~3 MB) are bundled inside
+`node_modules/@vladmandic/face-api/model/` after `npm install`.
+
+### 2 — Environment variables
+
+```bash
+cp .env.example .env
+# Edit .env and set SERPER_API_KEY (pipeline also works in --offline mode)
+```
+
+### 3 — Run the end-to-end pipeline
+
+**Terminal 1** — local blockchain node:
+```bash
+cd chain && npx hardhat node
+```
+
+**Terminal 2** — full pipeline:
+```bash
+# Live Serper Lens search (requires SERPER_API_KEY in .env):
+npm run pipeline -- --image ./samples/sample_face.jpg
+
+# Offline / no API key (uses canned fixtures from ./fixtures/):
+npm run pipeline -- --image ./samples/sample_face.jpg --offline
+```
+
+The pipeline automatically:
+1. Detects faces and computes real diagnostics
+2. Uploads to Litterbox (1-hour temp hosting) and queries Serper Lens twice
+3. Fetches candidate images and verifies with face embeddings
+4. Builds the 6-leaf Merkle tree
+5. Auto-deploys the contract if needed, then attests on-chain
+6. Immediately re-verifies and prints **PASS**
+
+### 4 — Tamper demo
+
+```bash
+# After attesting, grab the most recent record file:
+RECORD=$(ls attestations/*.json | head -1)
+
+cd chain
+
+# Should PASS:
+RECORD_PATH="../$RECORD" npx hardhat run scripts/verify.ts --network localhost
+
+# Mutates similarityScore in memory — should FAIL:
+TAMPER=1 RECORD_PATH="../$RECORD" npx hardhat run scripts/verify.ts --network localhost
+```
+
+### 5 — Web UI
+
+```bash
+npm run dev   # → http://localhost:3000
+```
+
+> **For best results:** Upload the same photo (same file, same dimensions) that you have
+> publicly posted on social media. Resized, cropped, or re-exported versions of the same
+> image may not match the indexed copy and will return fewer or no results.
+
+Upload a face photo — the UI runs the scan pipeline and shows:
+- Real face detection + diagnostics (bounding box, sharpness, dHash, SHA-256)
+- Reverse-image search results with verification badges (face-verified / probable / visual-only)
+- Blockchain Attestation panel with real Merkle root, EIP-712 signature, and tx hash
+
+> **First request is slow (~10 s)** due to TF.js WASM model loading. Subsequent requests are ~0.5–2 s.
 
 ---
 
-## Acceptable Use and Anti-Stalking Policy
+## Running on Polygon Amoy testnet
 
-WhereIsMyPhoto is strictly intended for finding personal photo appearances, tracking unauthorized re-uploads, and auditing intellectual property footprints.
+```bash
+npm run pipeline -- --image ./samples/me.jpg --network amoy
+```
 
-Users are strictly prohibited from using this software for:
-- Stalking, tracking, or harassing any individual.
-- Non-consensual surveillance, doxxing, or personal identification without authorization.
-- Circumventing privacy settings, protective orders, or legal injunctions.
-
-All uploaded images are processed in volatile memory only and are never permanently stored.
+Requires `PRIVATE_KEY` and optionally `AMOY_RPC_URL` in `.env`. If `PRIVATE_KEY` is unset the
+pipeline errors with clear instructions.
 
 ---
 
-## License
+## Smart Contract
 
-This project is licensed under the MIT License.
+`chain/contracts/AttestationRegistry.sol` — Solidity ^0.8.24
+
+```solidity
+// Write-once, tamper-evident record
+function attest(bytes32 recordId, bytes32 merkleRoot) external;
+// Reverts if recordId already attested
+
+// Read attestation
+function getAttestation(bytes32 recordId) external view
+  returns (bytes32 merkleRoot, address attester, uint64 timestamp);
+
+event Attested(bytes32 indexed recordId, bytes32 merkleRoot, address attester, uint256 timestamp);
+```
+
+Run tests:
+```bash
+cd chain && npx hardhat test   # 6 tests, all pass
+```
+
+---
+
+## Offline / Fixtures Mode
+
+The pipeline automatically uses `fixtures/lens_response.json` when `SERPER_API_KEY` is unset or
+`--offline` is passed. After the first live run, the real Serper response is saved to
+`fixtures/` automatically — so subsequent runs don't need network access.
+
+---
+
+## Technical notes
+
+- **Face detection:** @vladmandic/face-api with TF.js WASM backend (no native bindings).
+  Images are resized to ≤480px, converted to RGB Tensor3D, fed to SSD MobileNetV1.
+  Descriptors are 128-D float32 vectors; Euclidean distance < 0.5 = same face.
+
+- **Merkle tree:** 6 leaves — one keccak256 per canonical field (`field:value`).
+  Sorted-pair hashing at each level. Proofs are stored so any single field can be verified later.
+
+- **Litterbox:** `https://litterbox.catbox.moe/resources/internals/api.php` with `time=1h`.
+  Images auto-expire in 1 hour. Fallback to `freeimage.host` if Litterbox is unavailable.
+
+- **EIP-712:** The attesting wallet signs `{imageSha256, faceDescriptorHash, postUrl, merkleRoot, timestampIso}`.
+  `verify.ts` recovers the signer and compares to the on-chain `attester` address.
+
+---
+
+## Known Limitations
+
+- Reverse image search can only find photos that are **publicly indexed**.
+  The demo uses a photo that already appears on public web pages.
+- Lens rate limits: Serper free tier is ~100 searches/month (2 searches per pipeline run).
+- Candidate verification **skips images that cannot be fetched** (5-second timeout, 4xx/5xx, private content).
+- Face detection requires a clear, frontal, well-lit portrait. Profile shots or heavy compression may not detect.
+- TF.js WASM backend — pure WebAssembly, no GPU acceleration. First inference ~0.8 s, adequate for demo.
+
+---
+
+## Ethics
+
+This tool is designed for **auditing your own likeness** or images of consenting subjects.
+Do not use it to track individuals without their consent.
+See [/terms](/terms) and [/privacy](/privacy).
+
+---
+
+## BEFORE SUBMISSION
+
+- [ ] **Rotate the Serper API key.** The key in `.env` was used during development. Get a fresh one at https://serper.dev and update `.env`. Do not commit `.env`.
+- [ ] **Create a throwaway Ethereum wallet.** Use `cast wallet new` (Foundry) or MetaMask > export private key. Set `PRIVATE_KEY=0x...` in `.env`. Never commit a real private key.
+- [ ] **Get Amoy faucet POL.** Visit https://faucet.polygon.technology with your new wallet address. Claim POL for Amoy (chainId 80002).
+- [ ] **Deploy to Amoy:**
+  ```bash
+  cd chain && npx hardhat run scripts/deploy.ts --network amoy
+  ```
+- [ ] **Re-run the full pipeline on Amoy:**
+  ```bash
+  npm run pipeline -- --image ./samples/me.jpg --network amoy
+  ```
+  Confirm the PolygonScan link is printed and the explorer shows the tx.
+- [ ] **Put your own publicly-posted photo** in `samples/me.jpg` for the screen recording.
+- [ ] **Record the screen demo:**
+  - `npm run pipeline` → full run → PASS
+  - `verify.ts --tamper` → FAIL
+- [ ] **Grep for secrets before pushing:**
+  ```bash
+  grep -rn "634c23f\|PRIVATE_KEY=0x[a-f0-9]" src/ chain/ scripts/ || echo "clean"
+  ```

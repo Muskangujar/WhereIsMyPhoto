@@ -44,6 +44,8 @@ export const PRESET_SAMPLES: PresetSample[] = [
           similarity: 99.4,
           matchType: "exact",
           category: "social",
+          verification: "verified" as const,
+          faceDistance: 0.20,
         },
         {
           id: "res-2",
@@ -56,6 +58,8 @@ export const PRESET_SAMPLES: PresetSample[] = [
           similarity: 96.1,
           matchType: "exact",
           category: "social",
+          verification: "verified" as const,
+          faceDistance: 0.21,
         },
         {
           id: "res-3",
@@ -68,6 +72,8 @@ export const PRESET_SAMPLES: PresetSample[] = [
           similarity: 88.5,
           matchType: "cropped",
           category: "social",
+          verification: "probable" as const,
+          faceDistance: 0.53,
         },
         {
           id: "res-4",
@@ -80,6 +86,8 @@ export const PRESET_SAMPLES: PresetSample[] = [
           similarity: 85.0,
           matchType: "visually_similar",
           category: "blog",
+          verification: "unverified" as const,
+          faceDistance: null,
         },
         {
           id: "res-5",
@@ -92,6 +100,8 @@ export const PRESET_SAMPLES: PresetSample[] = [
           similarity: 82.3,
           matchType: "cropped",
           category: "social",
+          verification: "probable" as const,
+          faceDistance: 0.55,
         },
       ],
       blockchainPayload: {
@@ -142,6 +152,8 @@ export const PRESET_SAMPLES: PresetSample[] = [
           similarity: 98.7,
           matchType: "exact",
           category: "portfolio",
+          verification: "verified" as const,
+          faceDistance: 0.18,
         },
         {
           id: "res-ai-2",
@@ -154,6 +166,8 @@ export const PRESET_SAMPLES: PresetSample[] = [
           similarity: 91.2,
           matchType: "visually_similar",
           category: "blog",
+          verification: "unverified" as const,
+          faceDistance: null,
         },
       ],
       blockchainPayload: {
@@ -237,6 +251,8 @@ export const PRESET_SAMPLES: PresetSample[] = [
           similarity: 78.4,
           matchType: "visually_similar",
           category: "portfolio",
+          verification: "unverified" as const,
+          faceDistance: null,
         },
       ],
       blockchainPayload: {

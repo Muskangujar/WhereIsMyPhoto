@@ -2,12 +2,7 @@
 
 import React, { useState } from "react";
 import { SearchResultItem } from "@/types";
-import {
-  Globe,
-  SearchX,
-  ArrowUpRight,
-  ShieldCheck,
-} from "lucide-react";
+import { Globe, SearchX, ArrowUpRight, ShieldCheck } from "lucide-react";
 
 interface ResultsViewProps {
   results: SearchResultItem[];
@@ -26,49 +21,45 @@ export function ResultsView({
 
   const categories = [
     { id: "all", label: "All Results", count: results.length },
-    {
-      id: "social",
-      label: "Social Platforms",
-      count: results.filter((r) => r.category === "social").length,
-    },
-    {
-      id: "blog",
-      label: "Blogs & Articles",
-      count: results.filter((r) => r.category === "blog").length,
-    },
-    {
-      id: "portfolio",
-      label: "Portfolios & Databases",
-      count: results.filter((r) => r.category === "portfolio").length,
-    },
+    { id: "social", label: "Social", count: results.filter((r) => r.category === "social").length },
+    { id: "news", label: "News", count: results.filter((r) => r.category === "news").length },
+    { id: "portfolio", label: "Other", count: results.filter((r) => r.category !== "social" && r.category !== "news").length },
   ];
 
   const filteredResults =
     selectedCategory === "all"
       ? results
+      : selectedCategory === "portfolio"
+      ? results.filter((r) => r.category !== "social" && r.category !== "news")
       : results.filter((r) => r.category === selectedCategory);
 
-  const getMatchTypeBadge = (type: SearchResultItem["matchType"]) => {
-    switch (type) {
-      case "exact":
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-900 text-white">
-            Exact Match
-          </span>
-        );
-      case "cropped":
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-100 text-zinc-800 border border-zinc-300">
-            Cropped / Modified
-          </span>
-        );
-      case "visually_similar":
-        return (
-          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-50 text-zinc-600 border border-zinc-200">
-            Visually Similar
-          </span>
-        );
+  const getVerificationBadge = (item: SearchResultItem) => {
+    if (item.verification === "verified") {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+          ✓ Face Verified
+        </span>
+      );
     }
+    if (item.verification === "probable") {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+          ~ Probable Match
+        </span>
+      );
+    }
+    return (
+      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-50 text-zinc-600 border border-zinc-200">
+        Visual Only
+      </span>
+    );
+  };
+
+  const getSimilarityColor = (item: SearchResultItem) => {
+    if (item.similarity === 0 || item.faceDistance === null) return "text-zinc-400";
+    if (item.verification === "verified") return "text-emerald-700";
+    if (item.verification === "probable") return "text-amber-700";
+    return "text-zinc-600";
   };
 
   if (status === "no_results" || results.length === 0) {
@@ -82,7 +73,8 @@ export function ResultsView({
             Zero Public Web Matches Found
           </h3>
           <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed">
-            This image has no known public presence across indexed web sources. This indicates a private photo, an offline individual, or unindexed content.
+            This image has no known public presence across indexed web sources.
+            This typically indicates a private photo, an offline individual, or unindexed content.
           </p>
 
           {filteredAccessoriesCount && filteredAccessoriesCount > 0 && (
@@ -94,32 +86,45 @@ export function ResultsView({
             </div>
           )}
         </div>
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-white border border-zinc-200 shadow-xs text-xs text-zinc-800 font-medium">
+        <button
+          onClick={onHandoffBlockchain}
+          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-white border border-zinc-200 shadow-xs text-xs text-zinc-800 font-medium hover:bg-zinc-50 transition-colors"
+        >
           <ShieldCheck className="h-4 w-4 text-emerald-600" />
-          <span>Verified Zero Footprint: Ready for Blockchain Attestation</span>
-        </div>
+          <span>Attest Zero Footprint on Blockchain</span>
+        </button>
       </div>
     );
   }
 
+  const verifiedCount = results.filter((r) => r.verification === "verified").length;
+  const probableCount = results.filter((r) => r.verification === "probable").length;
+
   return (
     <div className="space-y-6">
-      {/* Top Header & Category Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h3 className="font-title text-2xl font-bold text-zinc-900 flex items-center gap-2">
             <Globe className="h-5 w-5 text-zinc-700" />
-            <span>Discovered Web and Social Matches</span>
+            <span>Discovered Web Matches</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-800 border border-zinc-200 font-sans font-medium">
               {results.length} Found
             </span>
           </h3>
-          <p className="text-xs text-zinc-500">
-            Public pages and posts where this image or its visual derivatives appear.
+          <p className="text-xs text-zinc-500 mt-0.5">
+            {verifiedCount > 0 && (
+              <span className="text-emerald-600 font-medium">{verifiedCount} face-verified</span>
+            )}
+            {verifiedCount > 0 && probableCount > 0 && <span> · </span>}
+            {probableCount > 0 && (
+              <span className="text-amber-600 font-medium">{probableCount} probable</span>
+            )}
+            {verifiedCount === 0 && probableCount === 0 && (
+              <span>No face matches confirmed — similarity scores from visual metadata only</span>
+            )}
           </p>
         </div>
 
-        {/* Categories Tab */}
         <div className="flex items-center gap-1.5 p-1 rounded-xl bg-zinc-100 border border-zinc-200 overflow-x-auto">
           {categories.map((cat) => (
             <button
@@ -137,7 +142,6 @@ export function ResultsView({
         </div>
       </div>
 
-      {/* Grid of Results */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredResults.map((item) => (
           <div
@@ -145,27 +149,34 @@ export function ResultsView({
             className="p-5 rounded-2xl white-card-hover flex flex-col justify-between group"
           >
             <div>
-              {/* Top Meta Bar */}
               <div className="flex items-center justify-between gap-2 mb-3">
                 <span className="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-zinc-100 text-zinc-800 border border-zinc-200">
                   {item.source}
                 </span>
                 <div className="flex items-center gap-2">
-                  {getMatchTypeBadge(item.matchType)}
-                  <span className="text-xs font-bold text-zinc-900 font-mono bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200">
-                    {item.similarity.toFixed(1)}% Match
-                  </span>
+                  {getVerificationBadge(item)}
+                  {item.faceDistance !== null ? (
+                    <span className={`text-xs font-bold font-mono bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200 ${getSimilarityColor(item)}`}>
+                      {item.similarity.toFixed(1)}%
+                    </span>
+                  ) : (
+                    <span className="text-xs text-zinc-400 font-mono bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200">
+                      n/a
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {/* Title & snippet */}
               <div className="flex items-start gap-3 mb-4">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={item.thumbnail}
-                  alt={item.title}
-                  className="h-16 w-16 rounded-xl object-cover flex-shrink-0 border border-zinc-200 shadow-xs group-hover:scale-105 transition-transform"
-                />
+                {item.thumbnail && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={item.thumbnail}
+                    alt={item.title}
+                    className="h-16 w-16 rounded-xl object-cover flex-shrink-0 border border-zinc-200 shadow-xs group-hover:scale-105 transition-transform"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                )}
                 <div className="overflow-hidden">
                   <h4 className="text-sm font-semibold text-zinc-900 group-hover:text-black transition-colors line-clamp-1">
                     {item.title}
@@ -177,7 +188,6 @@ export function ResultsView({
               </div>
             </div>
 
-            {/* Bottom link bar */}
             <div className="pt-3 border-t border-zinc-100 flex items-center justify-between text-xs">
               <span className="text-zinc-500 font-mono truncate max-w-[200px]">
                 {item.domain}
@@ -188,7 +198,7 @@ export function ResultsView({
                 rel="noreferrer"
                 className="flex items-center gap-1 text-zinc-900 hover:text-black font-semibold transition-colors"
               >
-                <span>Visit Public Page</span>
+                <span>Visit Page</span>
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </a>
             </div>

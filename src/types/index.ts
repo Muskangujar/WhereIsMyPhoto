@@ -1,3 +1,5 @@
+export type MatchVerification = "verified" | "probable" | "unverified";
+
 export interface SearchResultItem {
   id: string;
   source: string;
@@ -6,9 +8,11 @@ export interface SearchResultItem {
   title: string;
   snippet: string;
   thumbnail: string;
-  similarity: number; // 0 to 100
+  similarity: number; // 0 to 100, computed from face distance
   matchType: "exact" | "cropped" | "visually_similar";
   category: "social" | "news" | "blog" | "portfolio";
+  verification: MatchVerification;
+  faceDistance: number | null;
 }
 
 export interface ScanDiagnosticsData {
@@ -20,9 +24,10 @@ export interface ScanDiagnosticsData {
   aiConfidence: number; // 0 to 100
   isBlurry: boolean;
   sha256: string;
-  perceptualHash: string;
-  filteredAccessoriesCount?: number;
-  faceEncodingSample: number[];
+  perceptualHash: string; // dHash
+  filteredAccessoriesCount?: number; // from friend's commerce filter
+  faceEncodingSample: number[]; // first 8 of 128-D descriptor
+  faceDescriptorHash?: string; // sha256 of full 128-D descriptor
   timestamp: string;
 }
 
@@ -34,8 +39,10 @@ export interface SearchResponse {
   blockchainPayload: {
     schemaVersion: string;
     merkleRoot: string;
+    recordId?: string;
     imageSha256: string;
     facePerceptualHash: string;
+    faceDescriptorHash?: string;
     discoveredCount: number;
     topMatchesHashes: string[];
     timestampIso: string;
