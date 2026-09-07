@@ -10,55 +10,63 @@ export interface LensCandidate {
   source?: string;
 }
 
-// Litterbox (catbox.moe temporary hosting — auto-expires in 1 hour)
-async function uploadToLitterbox(buffer: Buffer, mimeType: string): Promise<string | null> {
-  const ext = mimeType.split("/")[1] || "jpg";
-  const filename = `scan-${Date.now()}.${ext}`;
-
-  const fd = new FormData();
-  fd.append("reqtype", "fileupload");
-  fd.append("time", "1h");
-  fd.append(
-    "fileToUpload",
-    new Blob([new Uint8Array(buffer)], { type: mimeType }),
-    filename
-  );
-
-  try {
-    const res = await fetch(
-      "https://litterbox.catbox.moe/resources/internals/api.php",
-      { method: "POST", body: fd, signal: AbortSignal.timeout(15_000) }
-    );
-    if (res.ok) {
-      const url = (await res.text()).trim();
-      if (url.startsWith("http")) return url;
-    }
-  } catch (e) {
-    console.warn("Litterbox upload failed:", (e as Error).message);
-  }
-
-  // Fallback: freeimage.host (note: may persist longer)
+// Upload to a public CDN so Google Lens can fetch it.
+// freeimage.host is tried first (Litterbox has been returning 500s).
+async function uploadToCDN(buffer: Buffer, mimeType: string): Promise<string | null> {
+  // Primary: freeimage.host (base64 upload, reliable)
   try {
     const base64 = buffer.toString("base64");
-    const fd2 = new FormData();
-    fd2.append("key", "6d207e02198a847aa98d0a2a901485a5");
-    fd2.append("action", "upload");
-    fd2.append("source", base64);
-    fd2.append("format", "json");
+    const fd = new FormData();
+    fd.append("key", "6d207e02198a847aa98d0a2a901485a5");
+    fd.append("action", "upload");
+    fd.append("source", base64);
+    fd.append("format", "json");
 
-    const res2 = await fetch("https://freeimage.host/api/1/upload", {
+    const res = await fetch("https://freeimage.host/api/1/upload", {
       method: "POST",
-      body: fd2,
-      signal: AbortSignal.timeout(15_000),
+      body: fd,
+      signal: AbortSignal.timeout(30_000),
     });
-    if (res2.ok) {
-      const json = await res2.json();
-      if (json?.image?.url) return json.image.url;
+    if (res.ok) {
+      const json = await res.json();
+      if (json?.image?.url) {
+        console.log("[CDN] freeimage.host upload OK:", json.image.url);
+        return json.image.url;
+      }
     }
+    console.warn("[CDN] freeimage.host upload failed:", res.status);
   } catch (e) {
-    console.warn("Freeimage fallback failed:", (e as Error).message);
+    console.warn("[CDN] freeimage.host error:", (e as Error).message);
   }
 
+  // Fallback: Litterbox (catbox.moe) — 1-hour temp link
+  try {
+    const ext = mimeType.split("/")[1] || "jpg";
+    const fd2 = new FormData();
+    fd2.append("reqtype", "fileupload");
+    fd2.append("time", "1h");
+    fd2.append(
+      "fileToUpload",
+      new Blob([new Uint8Array(buffer)], { type: mimeType }),
+      `scan-${Date.now()}.${ext}`
+    );
+    const res2 = await fetch(
+      "https://litterbox.catbox.moe/resources/internals/api.php",
+      { method: "POST", body: fd2, signal: AbortSignal.timeout(20_000) }
+    );
+    if (res2.ok) {
+      const url = (await res2.text()).trim();
+      if (url.startsWith("http")) {
+        console.log("[CDN] Litterbox upload OK:", url);
+        return url;
+      }
+    }
+    console.warn("[CDN] Litterbox upload failed:", res2.status);
+  } catch (e) {
+    console.warn("[CDN] Litterbox error:", (e as Error).message);
+  }
+
+  console.error("[CDN] All upload attempts failed — search will be skipped");
   return null;
 }
 
@@ -79,7 +87,20 @@ async function querySerperLens(
   }
 
   const data = await res.json();
-  return (Array.isArray(data.organic) ? data.organic : []) as LensCandidate[];
+  // Serper Lens returns results under "organic" (link key) and optionally "visualMatches"
+  const organic: any[] = Array.isArray(data.organic) ? data.organic : [];
+  const visual: any[] = Array.isArray(data.visualMatches) ? data.visualMatches : [];
+
+  // Normalise both arrays: Serper uses "link" for URL, LensCandidate expects "url"
+  const norm = (arr: any[]) => arr.map((v) => ({
+    url: v.link || v.url || "",
+    title: v.title || "",
+    snippet: v.snippet || v.source || "",
+    thumbnailUrl: v.thumbnailUrl || v.imageUrl || "",
+    source: v.source || "",
+  }));
+
+  return [...norm(organic), ...norm(visual)] as LensCandidate[];
 }
 
 function dedupeByUrl(candidates: LensCandidate[]): LensCandidate[] {
@@ -103,8 +124,8 @@ export async function searchWithLens(
   }
 
   const [fullUrl, faceUrl] = await Promise.all([
-    uploadToLitterbox(fullBuffer, mimeType),
-    faceBuffer ? uploadToLitterbox(faceBuffer, "image/jpeg") : Promise.resolve(null),
+    uploadToCDN(fullBuffer, mimeType),
+    faceBuffer ? uploadToCDN(faceBuffer, "image/jpeg") : Promise.resolve(null),
   ]);
 
   const queries: Promise<LensCandidate[]>[] = [];

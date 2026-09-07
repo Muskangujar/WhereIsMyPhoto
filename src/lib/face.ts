@@ -57,16 +57,17 @@ export async function detectFaces(buffer: Buffer): Promise<FaceDetection[]> {
   await init();
   const tf = faceapi.tf;
 
-  const meta = await sharp(buffer).metadata();
-  const origW = meta.width ?? 0;
-  const origH = meta.height ?? 0;
+  // Read dimensions after EXIF rotation so portrait images have correct W/H
+  const rotated = await sharp(buffer).rotate().toBuffer({ resolveWithObject: true });
+  const origW = rotated.info.width;
+  const origH = rotated.info.height;
 
   const scale = Math.min(1, MAX_DETECT_DIM / Math.max(origW, origH));
   const detW = Math.round(origW * scale);
   const detH = Math.round(origH * scale);
 
-  // RGB (3 channels) — face-api SSD requires it
-  const { data } = await sharp(buffer)
+  // RGB (3 channels) — use already-rotated buffer
+  const { data } = await sharp(rotated.data)
     .resize(detW, detH, { fit: "fill" })
     .removeAlpha()
     .raw()
@@ -80,7 +81,7 @@ export async function detectFaces(buffer: Buffer): Promise<FaceDetection[]> {
     raw = await faceapi
       .detectAllFaces(
         tensorF,
-        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.1 })
+        new faceapi.SsdMobilenetv1Options({ minConfidence: 0.05 })
       )
       .withFaceLandmarks()
       .withFaceDescriptors();
